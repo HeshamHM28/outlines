@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from outlines.fsm.json_schema import get_schema_from_enum, get_schema_from_signature
 from outlines.generate.api import SequenceGeneratorAdapter
 from outlines.models import OpenAI
-from outlines.samplers import Sampler, multinomial
+from outlines.samplers import multinomial as multinomial_sampler_type, Sampler, multinomial
 
 from .regex import regex
 
@@ -85,39 +85,47 @@ def json(
 def json_openai(
     model, schema_object: Union[str, object], sampler: Sampler = multinomial()
 ):
-    if not isinstance(sampler, multinomial):
+    # Accept multinomial class, instance, or default as an optimization
+    if sampler is not multinomial_sampler_type and not isinstance(sampler, multinomial_sampler_type):
         raise NotImplementedError(
             r"The OpenAI API does not support any other sampling algorithm "
             + "than the multinomial sampler."
         )
 
-    if isinstance(schema_object, type(BaseModel)):
-        schema = schema_object.model_json_schema()
-        schema["additionalProperties"] = False
-        schema = pyjson.dumps(schema)
-        format_sequence = lambda x: schema_object.parse_raw(x)
+    # Fast type detection and schema processing
+    if (isinstance(schema_object, type) and issubclass(schema_object, BaseModel)):
+        schema_cls = schema_object
+        # Cache the (mostly immutable) generated model schema
+        cache_key = id(schema_cls)
+        schema = _PYDANTIC_SCHEMA_CACHE.get(cache_key)
+        if schema is None:
+            schema = schema_cls.model_json_schema()
+            schema["additionalProperties"] = False
+            _PYDANTIC_SCHEMA_CACHE[cache_key] = schema
+        # No serialization to string unless needed
+        format_sequence = schema_cls.parse_raw
+        schema_for_openai = schema
     elif isinstance(schema_object, str):
-        schema = schema_object
-        format_sequence = lambda x: pyjson.loads(x)
+        schema_for_openai = pyjson.loads(schema_object)
+        format_sequence = pyjson.loads
     else:
         raise ValueError(
             f"Cannot parse schema {schema_object}. The schema must be either "
-            + "a Pydantic object, a function or a string that contains the JSON "
-            + "Schema specification"
+            + "a Pydantic class or a string that contains the JSON Schema specification"
         )
 
-    # create copied, patched model with normalized json schema set
+    # Patch/replace model with normalized json schema passed as a dict
     generator = model.new_with_replacements(
         response_format={
             "type": "json_schema",
             "json_schema": {
                 "name": "default",
                 "strict": True,
-                "schema": pyjson.loads(schema),
+                "schema": schema_for_openai,
             },
         }
     )
-
     generator.format_sequence = format_sequence
-
     return generator
+
+_PYDANTIC_SCHEMA_CACHE = {}
