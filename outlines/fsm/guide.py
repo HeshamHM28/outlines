@@ -16,6 +16,7 @@ from outlines_core.fsm.guide import (
 
 from outlines import grammars
 from outlines.fsm.parsing import PartialLark, PartialParserState
+import copyreg
 
 if TYPE_CHECKING:
     from outlines.models.tokenizer import Tokenizer
@@ -102,7 +103,7 @@ CFGState = collections.namedtuple("CFGState", ["parser_state", "prev_token"])
 
 class CFGGuide(Guide):
     """Guide to generate text that is in the language of a context-free Lark grammar."""
-
+    
     def __init__(self, cfg_string: str, tokenizer):
         """
         Construct the PartialLark parser and set the empty initial_state (PartialParserState)
@@ -111,7 +112,6 @@ class CFGGuide(Guide):
             "Outlines' public *community-contributed* CFG structured generation is experimental. "
             "Please review https://dottxt-ai.github.io/outlines/latest/reference/generation/cfg#disclaimer"
         )
-
         self.cfg_string = cfg_string
         self.tokenizer = tokenizer
         self.eos_token_id = self.tokenizer.eos_token_id
@@ -123,6 +123,7 @@ class CFGGuide(Guide):
         self.initial_state = CFGState(
             parser_state=self.parser.parse(""), prev_token=None
         )
+        self._decode_cache = {}
 
     def get_next_instruction(self, state: CFGState) -> Instruction:
         """Return the next instruction for guided generation.
@@ -230,17 +231,36 @@ class CFGGuide(Guide):
 
         Don't allow empty ("") tokens, raise ValueError
         """
-        parser_state = copy.copy(state.parser_state)  # prevent side effects
+        # Fast shallow copy instead of copy.copy
+        parser_state = self._fast_shallow_copy(state.parser_state)
 
-        # normalize
-        if state.prev_token is None:
-            new_token_str = self.tokenizer.decode([token_id])[0]
+        prev_token = state.prev_token
+        decode = self.tokenizer.decode
+
+        # Use internal cache to minimize repeated decode operations
+        cache = self._decode_cache
+        if prev_token is None:
+            # decode([token_id])[0]
+            k = ("first", token_id)
+            new_token_str = cache.get(k)
+            if new_token_str is None:
+                new_token_str = decode([token_id])[0]
+                cache[k] = new_token_str
         else:
-            prev_token_str = self.tokenizer.decode([[state.prev_token]])[0]
-            combined_token_str = self.tokenizer.decode([[state.prev_token, token_id]])[
-                0
-            ]
-            new_token_str = combined_token_str[len(prev_token_str) :]
+            k1 = ("prev", prev_token)
+            prev_token_str = cache.get(k1)
+            if prev_token_str is None:
+                # decode([[prev_token]]) returns a list of strings; [0]
+                prev_token_str = decode([[prev_token]])[0]
+                cache[k1] = prev_token_str
+
+            k2 = ("combo", prev_token, token_id)
+            combined_token_str = cache.get(k2)
+            if combined_token_str is None:
+                combined_token_str = decode([[prev_token, token_id]])[0]
+                cache[k2] = combined_token_str
+
+            new_token_str = combined_token_str[len(prev_token_str):]
 
         if new_token_str == "":
             raise ValueError("empty next token")
@@ -248,7 +268,6 @@ class CFGGuide(Guide):
         # update parser with new token
         parser_state.lexer.state.text += new_token_str
         self.parser.parse_from_state(parser_state, is_end=False)
-
         return parser_state
 
     def is_final_state(self, state: CFGState) -> bool:
@@ -274,3 +293,21 @@ class CFGGuide(Guide):
     def copy(self) -> "CFGGuide":
         """Create a copy of the Guide."""
         return CFGGuide(self.cfg_string, self.tokenizer)
+
+    def _fast_shallow_copy(self, obj):
+        # For standard classes, this is much faster than copy.copy
+        cls = type(obj)
+        copier = getattr(cls, '__copy__', None)
+        if copier:
+            return copier(obj)
+        # Fall back to copyreg if available, else manual shallow copy
+        try:
+            return copyreg._reconstructor(cls, object, None).__dict__.update(obj.__dict__) or obj
+        except Exception:
+            # fallback: use __class__ to create, and update dict
+            new = cls.__new__(cls)
+            try:
+                new.__dict__.update(obj.__dict__)
+            except Exception:
+                pass
+            return new
