@@ -1,6 +1,7 @@
 import dataclasses
 import math
 from typing import TYPE_CHECKING, Callable, Iterable, Iterator, List, Optional, Tuple
+from outlines.fsm.guide import Guide
 
 if TYPE_CHECKING:
     import torch
@@ -178,7 +179,8 @@ def is_generation_finished(fsms: List["Guide"], fsm_states: List[int]) -> bool:
     Whether all sequences are finished sampling.
 
     """
-    return all([fsm.is_final_state(state) for fsm, state in zip(fsms, fsm_states)])
+    # Use a generator expression to avoid creating a temporary list
+    return all(fsm.is_final_state(state) for fsm, state in zip(fsms, fsm_states))
 
 
 def update_token_ids(
