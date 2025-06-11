@@ -107,7 +107,9 @@ class Term:
         return optional(self)
 
     def exactly(self, count: int) -> "QuantifyExact":
-        return exactly(count, self)
+        # Inlined for slightly faster execution, avoids global function call overhead
+        term = self
+        return QuantifyExact(term, count)
 
     def at_least(self, count: int) -> "QuantifyMinimum":
         return at_least(count, self)
