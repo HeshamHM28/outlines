@@ -2,6 +2,8 @@ import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Optional, Protocol, Tuple
 
+import torch
+
 if TYPE_CHECKING:
     import torch
 
@@ -199,15 +201,20 @@ def keep_top_k_logits(k: int) -> Callable[["torch.Tensor"], "torch.Tensor"]:
         The ranking below which logit values are replaced by `-math.inf`.
 
     """
-    import torch
-
     if not isinstance(k, int) or k < 1:
-        raise ValueError(f"`k` must be a strictly positive integers, got {k} instead.")
+        raise ValueError(f"`k` must be a strictly positive integer, got {k} instead.")
 
     def logits_processor(logits: torch.Tensor) -> torch.Tensor:
-        num_to_keep = min(k, logits.size(-1))
-        mask_idx = logits < torch.topk(logits, num_to_keep)[0][..., -1, None]
-        return logits.masked_fill(mask_idx, -math.inf)
+        num_classes = logits.size(-1)
+        num_to_keep = min(k, num_classes)
+        # Compute the k-th highest value (threshold)
+        topk_values = torch.topk(logits, num_to_keep, largest=True, sorted=False).values
+        # .values: same shape as logits except last dim is num_to_keep instead of all
+        kth_value = topk_values[..., -1]   # take the lowest of the top k (threshold)
+        # Mask logits below this threshold
+        # Use broadcasting: kth_value shape (...), logits shape (..., num_classes)
+        mask = logits < kth_value.unsqueeze(-1)
+        return logits.masked_fill(mask, -math.inf)
 
     return logits_processor
 
