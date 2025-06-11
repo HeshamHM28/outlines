@@ -1,6 +1,7 @@
 import dataclasses
 import math
 from typing import TYPE_CHECKING, Callable, Iterable, Iterator, List, Optional, Tuple
+import torch
 
 if TYPE_CHECKING:
     import torch
@@ -301,12 +302,28 @@ def bias_logits(logits: "torch.Tensor", allowed_token_ids: List) -> "torch.Tenso
     A view of the original logits tensor where some values are masked.
 
     """
-    import torch
-
+    # Prepare output with -inf everywhere
     biased_logits = torch.full_like(logits, -math.inf, device=logits.device)
+
+    # Indices where ids is None: copy all logits for that row
+    rows_all = [i for i, ids in enumerate(allowed_token_ids) if ids is None]
+    if rows_all:
+        biased_logits[rows_all] = logits[rows_all]
+
+    # Indices where ids is not None: gather all row and col indices
+    row_indices = []
+    col_indices = []
     for i, ids in enumerate(allowed_token_ids):
         if ids is not None:
-            biased_logits[i, ids] = logits[i, ids]
-        else:
-            biased_logits[i] = logits[i]
+            if not isinstance(ids, torch.Tensor):
+                ids = torch.tensor(ids, device=logits.device)
+            num = ids.numel()
+            if num > 0:
+                row_indices.append(torch.full((num,), i, dtype=torch.long, device=logits.device))
+                col_indices.append(ids.view(-1))
+    if row_indices:
+        row_indices = torch.cat(row_indices)
+        col_indices = torch.cat(col_indices)
+        biased_logits[row_indices, col_indices] = logits[row_indices, col_indices]
+
     return biased_logits
