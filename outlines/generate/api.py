@@ -96,15 +96,20 @@ class SequenceGenerator:
 
         """
         if stop_sequences:
-            match_indexes = [sequence.find(seq) for seq in stop_sequences]
-            if any([index != -1 for index in match_indexes]):
-                # select the stop_sequence that is found first in the sequence
-                min_match_index_value = min([i for i in match_indexes if i != -1])
-                min_match_index_pos = match_indexes.index(min_match_index_value)
-                sequence = sequence[
-                    : match_indexes[min_match_index_pos]
-                    + len(stop_sequences[min_match_index_pos])
-                ]
+            min_pos = None
+            min_stop_len = 0
+            for stop_seq in stop_sequences:
+                pos = sequence.find(stop_seq)
+                if pos != -1:
+                    if min_pos is None or pos < min_pos:
+                        min_pos = pos
+                        min_stop_len = len(stop_seq)
+                        # Early exit: cannot find earlier than 0
+                        if min_pos == 0:
+                            break
+
+            if min_pos is not None:
+                sequence = sequence[:min_pos + min_stop_len]
 
         return sequence
 
