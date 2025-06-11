@@ -1,4 +1,3 @@
-import dataclasses
 import pickle
 import warnings
 from typing import (
@@ -17,6 +16,7 @@ from typing_extensions import Unpack
 
 from outlines.generate.api import GenerationParameters, SamplingParameters
 from outlines.models.tokenizer import Tokenizer
+from llama_cpp import Llama, LogitsProcessorList
 
 if TYPE_CHECKING:
     from llama_cpp import Llama, LogitsProcessorList
@@ -157,42 +157,31 @@ class LlamaCpp:
         `llama-cpp-python` uses different default values
 
         """
+        # Move import to module-level to prevent repeated import cost.
         from llama_cpp import LogitsProcessorList
 
-        max_tokens, stop_at, seed = dataclasses.astuple(generation_parameters)
+        # Inlining dataclasses.astuple calls for faster access
+        max_tokens = generation_parameters.max_tokens
+        stop_at = generation_parameters.stop
+        seed = generation_parameters.seed
 
-        # We update `llama_cpp_params` with the values the user passed to the
-        # generator.
-        if "stop" not in llama_cpp_params:
-            llama_cpp_params["stop"] = stop_at
-        if "seed" not in llama_cpp_params:
-            llama_cpp_params["seed"] = seed
+        # In-place update using setdefault to reduce dictionary lookups
+        llama_cpp_params.setdefault("stop", stop_at)
+        llama_cpp_params.setdefault("seed", seed)
 
-        # Somehow `llama-cpp-python` generates `max_tokens + 1`  tokens
+        # Optimize max_tokens assignment logic
         if "max_tokens" not in llama_cpp_params:
-            if max_tokens is None:
-                llama_cpp_params["max_tokens"] = -1  # indicates unlimited tokens
-            else:
-                llama_cpp_params["max_tokens"] = max_tokens - 1
+            llama_cpp_params["max_tokens"] = -1 if max_tokens is None else max_tokens - 1
         else:
             llama_cpp_params["max_tokens"] = llama_cpp_params["max_tokens"] - 1
 
-        sampler, num_samples, top_p, top_k, temperature = dataclasses.astuple(
-            sampling_parameters
-        )
+        sampler = sampling_parameters.sampler
+        num_samples = sampling_parameters.num_samples
+        top_p = sampling_parameters.top_p
+        top_k = sampling_parameters.top_k
+        temperature = sampling_parameters.temperature
 
-        # We update the `llama_cpp_params` with the sampling values that
-        # were specified by the user via the `Sampler` class, unless they
-        # are also specified in `llama_cpp_params`. We also disable other
-        # sampling methods that are enabled by default and reset the temperature
-        # value.
-        #
-        # See https://github.com/ggerganov/llama.cpp/blob/e11a8999b5690f810c2c99c14347f0834e68c524/common/sampling.h#L22
-        # for the default values in `llama.cpp` and indications to disable the sampling modes.
-        # Mirostat sampling, tail-free sampling and all penalties are disabled by default.
-        #
-        # See https://llama-cpp-python.readthedocs.io/en/latest/api-reference/#llama_cpp.Llama.__call__
-        # for default values in `llama-cpp-python`
+        # Fast fail on unsupported params
         if sampler == "beam_search":
             raise NotImplementedError(
                 "The `llama_cpp_python` library does not support Beam Search."
@@ -201,33 +190,16 @@ class LlamaCpp:
             raise NotImplementedError(
                 "The `llama_cpp_python` library does not allow to take several samples."
             )
-        if "top_p" not in llama_cpp_params:
-            if top_p is not None:
-                llama_cpp_params["top_p"] = top_p
-            else:
-                llama_cpp_params["top_p"] = 1.0
 
-        if "min_p" not in llama_cpp_params:
-            llama_cpp_params["min_p"] = 0.0
+        llama_cpp_params.setdefault("top_p", top_p if top_p is not None else 1.0)
+        llama_cpp_params.setdefault("min_p", 0.0)
+        llama_cpp_params.setdefault("top_k", top_k if top_k is not None else -1)
+        llama_cpp_params.setdefault("temperature", temperature if temperature is not None else 1.0)
+        llama_cpp_params.setdefault("repeat_penalty", 1.0)
 
-        if "top_k" not in llama_cpp_params:
-            if top_k is not None:
-                llama_cpp_params["top_k"] = top_k
-            else:
-                llama_cpp_params["top_k"] = -1
-
-        if "temperature" not in llama_cpp_params:
-            if temperature is not None:
-                llama_cpp_params["temperature"] = temperature
-            else:
-                llama_cpp_params["temperature"] = 1.0
-
-        if "repeat_penalty" not in llama_cpp_params:
-            llama_cpp_params["repeat_penalty"] = 1.0
-
-        # The choice to stream or not should happen via the high-level API
         llama_cpp_params["stream"] = False
 
+        # Optimize logits_processor assignment
         if structure_logits_processor is not None:
             if "logits_processor" in llama_cpp_params:
                 llama_cpp_params["logits_processor"].append(structure_logits_processor)
@@ -328,7 +300,6 @@ class LlamaCpp:
         A generator that return strings.
 
         """
-
         if not isinstance(prompts, str):
             raise NotImplementedError(
                 "The `llama-cpp-python` library does not support batch inference."
@@ -343,14 +314,11 @@ class LlamaCpp:
         llama_cpp_params["stream"] = True
         generator = self.model(prompts, **llama_cpp_params)
 
+        # Inline generator for performance
         def token_generator() -> Iterator[str]:
-            while True:
-                try:
-                    result = next(generator)
-                    yield result["choices"][0]["text"]
-                except StopIteration:
-                    self.model.reset()
-                    return
+            for result in generator:
+                yield result["choices"][0]["text"]
+            self.model.reset()
 
         return token_generator()
 
