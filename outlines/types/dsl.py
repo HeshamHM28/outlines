@@ -370,8 +370,8 @@ def zero_or_more(term: Union[Term, str]) -> KleeneStar:
 
 
 def one_or_more(term: Union[Term, str]) -> KleenePlus:
-    term = String(term) if isinstance(term, str) else term
-    return KleenePlus(term)
+    # Directly pass the correct type to KleenePlus
+    return KleenePlus(term if not isinstance(term, str) else String(term))
 
 
 def to_regex(term: Term) -> str:
