@@ -909,10 +909,10 @@ class PartialPythonIndenter(PartialIndenter):
 
 
 def get_contextual_lexer(x: Union[PartialLexerThread, PartialParsingFrontend]):
-    if isinstance(x.lexer, ContextualLexer):
-        return x.lexer
-    else:
-        return x.lexer.lexer
+    lexer = x.lexer
+    if type(lexer) is ContextualLexer:
+        return lexer
+    return lexer.lexer
 
 
 def terminals_to_fsms(lp: PartialLark) -> Dict[str, FSM]:
