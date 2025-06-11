@@ -17,6 +17,7 @@ from typing_extensions import Unpack
 
 from outlines.generate.api import GenerationParameters, SamplingParameters
 from outlines.models.tokenizer import Tokenizer
+from llama_cpp import Llama
 
 if TYPE_CHECKING:
     from llama_cpp import Llama, LogitsProcessorList
@@ -24,14 +25,18 @@ if TYPE_CHECKING:
 
 class LlamaCppTokenizer(Tokenizer):
     def __init__(self, model: "Llama"):
+        # Cache tokenizer reference
+        tokenizer = model.tokenizer()
+        self.tokenizer = tokenizer
         self.eos_token_id = model.token_eos()
-        self.eos_token = model.tokenizer().decode([self.eos_token_id])
+        self.eos_token = tokenizer.decode([self.eos_token_id])
         self.pad_token_id = self.eos_token_id
-        self.special_tokens: Set[str] = set()
 
-        self.vocabulary: Dict[str, int] = dict()
+        # Special tokens
+        self._special_tokens: Set[str] = set()
+        self._special_tokens_sorted: List[str] = []  # maintain sorted cache
 
-        self.tokenizer = model.tokenizer()
+        self.vocabulary: Dict[str, int] = {}
 
         # TODO: Remove when https://github.com/ggerganov/llama.cpp/pull/5613 is resolved
         self._hf_tokenizer = None
@@ -39,17 +44,17 @@ class LlamaCppTokenizer(Tokenizer):
             self.vocabulary = model.tokenizer_.hf_tokenizer.get_vocab()
             self._hf_tokenizer = model.tokenizer_.hf_tokenizer
         except AttributeError:
-            # ###
-            for t in range(model.n_vocab()):
-                token_piece = model.tokenizer().decode([t])
-                self.vocabulary[token_piece] = t
+            # populate vocabulary without HF tokenizer
+            decode = tokenizer.decode  # local for speedup
+            n_vocab = model.n_vocab()
+            vocabulary = {}
+            for t in range(n_vocab):
+                token_piece = decode([t])
+                vocabulary[token_piece] = t
+            self.vocabulary = vocabulary
 
         # ensure stable ordering of vocabulary
-        self.vocabulary = {
-            tok: tok_id
-            for tok, tok_id in sorted(self.vocabulary.items(), key=lambda x: x[1])
-        }
-
+        self.vocabulary = dict(sorted(self.vocabulary.items(), key=lambda x: x[1]))
         self._hash = None
 
     def decode(self, token_ids: List[int]) -> List[str]:
@@ -95,16 +100,30 @@ class LlamaCppTokenizer(Tokenizer):
 
     def __getstate__(self):
         """Create a stable representation for outlines.caching"""
+        # Only update sorted list if set changed
+        if not self._special_tokens_sorted or len(self._special_tokens) != len(self._special_tokens_sorted) or set(self._special_tokens_sorted) != self._special_tokens:
+            self._special_tokens_sorted = sorted(self._special_tokens)
         return (
             self.vocabulary,
             self.eos_token_id,
             self.eos_token,
             self.pad_token_id,
-            sorted(self.special_tokens),
+            self._special_tokens_sorted,
         )
 
     def __setstate__(self, state):
         raise NotImplementedError("Cannot load a pickled llamacpp tokenizer")
+
+    # Use property to manage cached sorted special tokens
+    @property
+    def special_tokens(self) -> Set[str]:
+        return self._special_tokens
+
+    @special_tokens.setter
+    def special_tokens(self, value: Set[str]):
+        self._special_tokens = value
+        # Invalidate sorted cache
+        self._special_tokens_sorted = sorted(value)
 
 
 class LlamaCppParams(TypedDict, total=False):
