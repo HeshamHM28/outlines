@@ -332,7 +332,8 @@ def either(*terms: Union[str, Term]):
     This factory function automatically translates string arguments
     into `String` objects.
     """
-    terms = [String(arg) if isinstance(arg, str) else arg for arg in terms]
+    String_local = String  # Localize for faster attribute access in loop
+    terms = [String_local(arg) if type(arg) is str else arg for arg in terms]
     return Alternatives(terms)
 
 
