@@ -17,6 +17,7 @@ from typing_extensions import Unpack
 
 from outlines.generate.api import GenerationParameters, SamplingParameters
 from outlines.models.tokenizer import Tokenizer
+from llama_cpp import Llama
 
 if TYPE_CHECKING:
     from llama_cpp import Llama, LogitsProcessorList
@@ -24,31 +25,34 @@ if TYPE_CHECKING:
 
 class LlamaCppTokenizer(Tokenizer):
     def __init__(self, model: "Llama"):
+        self.tokenizer = model.tokenizer()
         self.eos_token_id = model.token_eos()
-        self.eos_token = model.tokenizer().decode([self.eos_token_id])
+        self.eos_token = self.tokenizer.decode([self.eos_token_id])
         self.pad_token_id = self.eos_token_id
         self.special_tokens: Set[str] = set()
 
-        self.vocabulary: Dict[str, int] = dict()
+        # Vocabulary construction: minimize tokenizer() calls
+        self.vocabulary: Dict[str, int] = {}
 
-        self.tokenizer = model.tokenizer()
-
-        # TODO: Remove when https://github.com/ggerganov/llama.cpp/pull/5613 is resolved
+        # Store a reference to the HF tokenizer if available
         self._hf_tokenizer = None
-        try:
-            self.vocabulary = model.tokenizer_.hf_tokenizer.get_vocab()
-            self._hf_tokenizer = model.tokenizer_.hf_tokenizer
-        except AttributeError:
-            # ###
-            for t in range(model.n_vocab()):
-                token_piece = model.tokenizer().decode([t])
+        tokenizer_obj = getattr(model, "tokenizer_", None)
+        hf_tokenizer = getattr(tokenizer_obj, "hf_tokenizer", None)
+        if hf_tokenizer is not None:
+            self.vocabulary = hf_tokenizer.get_vocab()
+            self._hf_tokenizer = hf_tokenizer
+        else:
+            n_vocab = model.n_vocab()
+            # Decode tokens only once and assign to vocabulary
+            decode = self.tokenizer.decode
+            for t in range(n_vocab):
+                token_piece = decode([t])
                 self.vocabulary[token_piece] = t
 
-        # ensure stable ordering of vocabulary
-        self.vocabulary = {
-            tok: tok_id
-            for tok, tok_id in sorted(self.vocabulary.items(), key=lambda x: x[1])
-        }
+        # Ensure stable ordering of vocabulary
+        self.vocabulary = dict(
+            sorted(self.vocabulary.items(), key=lambda x: x[1])
+        )
 
         self._hash = None
 
@@ -63,13 +67,16 @@ class LlamaCppTokenizer(Tokenizer):
             raise NotImplementedError(
                 "llama-cpp-python tokenizer doesn't support batch tokenization"
             )
-        token_ids = self.tokenizer.tokenize(
-            prompt.encode("utf-8", errors="ignore"), add_bos=add_bos, special=special
-        )
-        # generate attention mask, missing from llama-cpp-python
-        attention_mask = [
-            1 if token_id != self.pad_token_id else 0 for token_id in token_ids
-        ]
+        # Use single prompt.encode and call tokenizer only once
+        prompt_bytes = prompt.encode("utf-8", errors="ignore")
+        token_ids = self.tokenizer.tokenize(prompt_bytes, add_bos=add_bos, special=special)
+
+        # Generate attention mask with minimal overhead
+        # Fast path: if no token_id matches pad_token_id, use all-ones
+        if self.pad_token_id not in token_ids:
+            attention_mask = [1] * len(token_ids)
+        else:
+            attention_mask = [int(token_id != self.pad_token_id) for token_id in token_ids]
         return token_ids, attention_mask
 
     def convert_token_to_string(self, token: str) -> str:
