@@ -287,13 +287,11 @@ def _update_arrays_type(arrays, results):
         The current output of the function being vectorized.
 
     """
-
     updated_arrays = []
     for array, result in zip(arrays, results):
         if array.dtype.type == np.str_:
-            if array.dtype < np.array(result).dtype:
-                array = array.astype(np.array(result).dtype)
-
+            result_dtype = np.array(result).dtype
+            if array.dtype < result_dtype:
+                array = array.astype(result_dtype)
         updated_arrays.append(array)
-
     return tuple(updated_arrays)
