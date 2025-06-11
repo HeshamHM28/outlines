@@ -2,6 +2,7 @@ import inspect
 import json
 import warnings
 from enum import Enum
+from functools import lru_cache
 from typing import Callable, Type, Union
 
 from pydantic import BaseModel, create_model
@@ -48,13 +49,17 @@ def get_schema_from_signature(fn: Callable) -> dict:
 
     """
     signature = inspect.signature(fn)
-    arguments = {}
-    for name, arg in signature.parameters.items():
+    # New: build lists for param names and types at once
+    param_items = list(signature.parameters.items())
+    param_keys = []
+    param_types = []
+    for name, arg in param_items:
         if arg.annotation == inspect._empty:
             raise ValueError("Each argument must have a type annotation")
-        else:
-            arguments[name] = (arg.annotation, ...)
+        param_keys.append(name)
+        param_types.append(arg.annotation)
 
+    # Try to use __name__, fallback to 'Arguments' if unavailable
     try:
         fn_name = fn.__name__
     except Exception as e:
@@ -63,9 +68,9 @@ def get_schema_from_signature(fn: Callable) -> dict:
             f"The function name could not be determined. Using default name 'Arguments' instead. For debugging, here is exact error:\n{e}",
             category=UserWarning,
         )
-    model = create_model(fn_name, **arguments)
 
-    return model.model_json_schema()
+    # Use the cached helper
+    return _schema_from_signature_cached(fn_name, tuple(param_keys), tuple(param_types))
 
 
 def get_schema_from_enum(myenum: type[Enum]) -> dict:
@@ -73,11 +78,23 @@ def get_schema_from_enum(myenum: type[Enum]) -> dict:
         raise ValueError(
             f"Your enum class {myenum.__name__} has 0 members. If you are working with an enum of functions, do not forget to register them as callable (using `partial` for instance)"
         )
-    choices = [
-        get_schema_from_signature(elt.value.func)
-        if callable(elt.value)
-        else {"const": elt.value}
-        for elt in myenum
-    ]
-    schema = {"title": myenum.__name__, "oneOf": choices}
-    return schema
+    # Prealloc
+    choices = []
+    for elt in myenum:
+        v = elt.value
+        if callable(v):
+            # Use the optimized and cached signature->schema
+            # If value is a callable with attribute 'func' (partial/lambda), use that
+            func = v.func if hasattr(v, "func") else v
+            choices.append(get_schema_from_signature(func))
+        else:
+            choices.append({'const': v})
+    return {"title": myenum.__name__, "oneOf": choices}
+
+
+@lru_cache(maxsize=256)
+def _schema_from_signature_cached(qual_name: str, param_keys: tuple, param_types: tuple) -> dict:
+    # Helper for the signature-to-schema, uses primitive args for cacheability.
+    fields = {name: (tp, ...) for name, tp in zip(param_keys, param_types)}
+    model = create_model(qual_name, **fields)
+    return model.model_json_schema()
