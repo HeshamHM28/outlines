@@ -104,7 +104,8 @@ class Term:
         return self.display_ascii_tree()
 
     def optional(self) -> "Optional":
-        return optional(self)
+        # Avoid extra function call for the common case
+        return Optional(self)
 
     def exactly(self, count: int) -> "QuantifyExact":
         return exactly(count, self)
