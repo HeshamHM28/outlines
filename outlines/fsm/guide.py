@@ -258,9 +258,17 @@ class CFGGuide(Guide):
 
     def can_terminate_state(self, state: CFGState) -> bool:
         """Generation is allowed to terminate"""
-        if state.parser_state is not None:
+        parser_state = state.parser_state
+        if parser_state is not None:
             try:
-                copy.copy(state.parser_state).feed_eof()
+                # Avoid generic copy.copy for performance: use copy() if available
+                try:
+                    parser_state_copy = parser_state.copy()
+                except AttributeError:
+                    # Fall back to copy.copy if .copy() doesn't exist
+                    import copy
+                    parser_state_copy = copy.copy(parser_state)
+                parser_state_copy.feed_eof()
             except UnexpectedToken:
                 return False
         return True
