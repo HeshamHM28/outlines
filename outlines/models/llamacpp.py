@@ -17,6 +17,7 @@ from typing_extensions import Unpack
 
 from outlines.generate.api import GenerationParameters, SamplingParameters
 from outlines.models.tokenizer import Tokenizer
+from llama_cpp import Llama
 
 if TYPE_CHECKING:
     from llama_cpp import Llama, LogitsProcessorList
@@ -39,7 +40,6 @@ class LlamaCppTokenizer(Tokenizer):
             self.vocabulary = model.tokenizer_.hf_tokenizer.get_vocab()
             self._hf_tokenizer = model.tokenizer_.hf_tokenizer
         except AttributeError:
-            # ###
             for t in range(model.n_vocab()):
                 token_piece = model.tokenizer().decode([t])
                 self.vocabulary[token_piece] = t
@@ -51,6 +51,14 @@ class LlamaCppTokenizer(Tokenizer):
         }
 
         self._hash = None
+
+        # Optimize: Cache SPIECE_UNDERLINE lookup if _hf_tokenizer is present
+        if self._hf_tokenizer is not None:
+            # Import SPIECE_UNDERLINE only once if needed
+            from transformers.file_utils import SPIECE_UNDERLINE
+            self._SPIECE_UNDERLINE = SPIECE_UNDERLINE
+        else:
+            self._SPIECE_UNDERLINE = None
 
     def decode(self, token_ids: List[int]) -> List[str]:
         decoded_bytes = self.tokenizer.detokenize(token_ids)
@@ -73,10 +81,10 @@ class LlamaCppTokenizer(Tokenizer):
         return token_ids, attention_mask
 
     def convert_token_to_string(self, token: str) -> str:
+        # Avoid repeated import and attribute lookup using cached value
         if self._hf_tokenizer is not None:
-            from transformers.file_utils import SPIECE_UNDERLINE
-
             token_str = self._hf_tokenizer.convert_tokens_to_string([token])
+            SPIECE_UNDERLINE = self._SPIECE_UNDERLINE
             if token.startswith(SPIECE_UNDERLINE) or token == "<0x20>":
                 token_str = " " + token_str
             return token_str
