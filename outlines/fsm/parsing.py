@@ -920,13 +920,9 @@ def terminals_to_fsms(lp: PartialLark) -> Dict[str, FSM]:
 
     symbol_names_and_fsms = {}
     for terminal in lp.terminals:
-        pattern = interegular.parse_pattern(terminal.pattern.to_regexp())
-        # TODO: Use `pyparser.terminals[0].pattern.flags`?
-        try:
-            fsm, _ = make_deterministic_fsm(pattern.to_fsm().reduce())
-        except Unsupported:
-            fsm = None
-
+        regexp = terminal.pattern.to_regexp()
+        flags = getattr(terminal.pattern, 'flags', None)
+        fsm = _fsm_from_pattern_cache(regexp, flags)
         symbol_names_and_fsms[terminal.name] = fsm
 
     return symbol_names_and_fsms
@@ -1125,3 +1121,19 @@ def walk_fsm(
         return []
 
     return accepted_states
+
+
+def _fsm_from_pattern_cache(
+    regexp: str, flags: Any, 
+    _cache: Dict[Tuple[str, Any], FSM]={}
+) -> FSM:
+    """Get (or compute and cache) an FSM from a pattern regexp and flags."""
+    key = (regexp, flags)
+    if key not in _cache:
+        pattern = interegular.parse_pattern(regexp)
+        try:
+            fsm, _ = make_deterministic_fsm(pattern.to_fsm().reduce())
+        except Unsupported:
+            fsm = None
+        _cache[key] = fsm
+    return _cache[key]
