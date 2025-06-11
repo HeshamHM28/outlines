@@ -2,6 +2,7 @@ import inspect
 import json
 import warnings
 from enum import Enum
+from functools import lru_cache
 from typing import Callable, Type, Union
 
 from pydantic import BaseModel, create_model
@@ -47,25 +48,20 @@ def get_schema_from_signature(fn: Callable) -> dict:
     to `fn` using the ** unpacking syntax.
 
     """
-    signature = inspect.signature(fn)
-    arguments = {}
-    for name, arg in signature.parameters.items():
-        if arg.annotation == inspect._empty:
-            raise ValueError("Each argument must have a type annotation")
-        else:
-            arguments[name] = (arg.annotation, ...)
-
     try:
-        fn_name = fn.__name__
+        function_key = get_function_key(fn)
+        return _get_schema_from_signature_cached(function_key)
     except Exception as e:
-        fn_name = "Arguments"
-        warnings.warn(
-            f"The function name could not be determined. Using default name 'Arguments' instead. For debugging, here is exact error:\n{e}",
-            category=UserWarning,
-        )
-    model = create_model(fn_name, **arguments)
-
-    return model.model_json_schema()
+        # try to get fn name for warning
+        try:
+            fn_name = fn.__name__
+        except Exception as inner_e:
+            fn_name = "Arguments"
+            warnings.warn(
+                f"The function name could not be determined. Using default name 'Arguments' instead. Additional error:\n{inner_e}",
+                category=UserWarning,
+            )
+        raise
 
 
 def get_schema_from_enum(myenum: type[Enum]) -> dict:
@@ -81,3 +77,25 @@ def get_schema_from_enum(myenum: type[Enum]) -> dict:
     ]
     schema = {"title": myenum.__name__, "oneOf": choices}
     return schema
+
+
+def get_function_key(fn: Callable):
+    """Return a tuple uniquely identifying a function's schema-relevant info."""
+    sig = inspect.signature(fn)
+    items = tuple(
+        (name, param.annotation)
+        for name, param in sig.parameters.items()
+    )
+    # Adding function name for cache uniqueness, in rare case of different functions with same sig in different modules
+    return (fn.__name__, items)
+
+@lru_cache(maxsize=256)
+def _get_schema_from_signature_cached(function_key):
+    fn_name, params = function_key
+    arguments = {}
+    for name, type_ in params:
+        if type_ == inspect._empty:
+            raise ValueError("Each argument must have a type annotation")
+        arguments[name] = (type_, ...)
+    model = create_model(fn_name, **arguments)
+    return model.model_json_schema()
