@@ -283,14 +283,16 @@ def get_fn_source(fn: Callable):
     if not callable(fn):
         raise TypeError("The `source` filter only applies to callables.")
 
-    source = textwrap.dedent(inspect.getsource(fn))
-    re_search = re.search(re.compile(r"(\bdef\b.*)", re.DOTALL), source)
-    if re_search is not None:
-        source = re_search.group(0)
-    else:
+    # inspect.getsource already dedents the source since Python 3.5+
+    source = inspect.getsource(fn)
+
+    # Fast string search for first 'def' line
+    idx = source.find('def ')
+    if idx == -1:
         raise TypeError("Could not read the function's source code")
 
-    return source
+    # Return from first 'def' onwards
+    return source[idx:]
 
 
 def get_fn_signature(fn: Callable):
@@ -361,3 +363,5 @@ def parse_pydantic_schema(raw_schema, definitions):
             simple_schema[name] = f"<{name}>"
 
     return simple_schema
+
+_DEF_LINE_RE = re.compile(r"\bdef\b.*", re.DOTALL)
