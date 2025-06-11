@@ -30,8 +30,14 @@ class OutlinesExLlamaV2Tokenizer:
         return token
 
     def decode(self, token_ids: "torch.LongTensor") -> List[str]:
+        # Only convert to tensor if not already a torch.Tensor
+        if not isinstance(token_ids, torch.Tensor):
+            t_tokens = torch.as_tensor(token_ids, dtype=torch.long)
+        else:
+            t_tokens = token_ids
+
         decoded = self.exl2_tokenizer.decode(
-            torch.tensor(token_ids),
+            t_tokens,
             decode_special_tokens=False,
         )
         if isinstance(decoded, str):
