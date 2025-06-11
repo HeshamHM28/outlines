@@ -319,7 +319,10 @@ class QuantifyBetween(Term):
 
 
 def regex(pattern: str):
-    return Regex(pattern)
+    # Memoize compiled regex objects to avoid recompilation
+    if pattern not in _cache:
+        _cache[pattern] = Regex(pattern)
+    return _cache[pattern]
 
 
 def json_schema(schema: Union[str, dict, type[BaseModel]]):
@@ -412,3 +415,5 @@ def to_regex(term: Term) -> str:
             raise TypeError(
                 f"Cannot convert object {repr(term)} to a regular expression."
             )
+
+_cache = {}
