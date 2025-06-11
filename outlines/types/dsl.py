@@ -343,7 +343,11 @@ def optional(term: Union[Term, str]) -> Optional:
 
 def exactly(count: int, term: Union[Term, str]) -> QuantifyExact:
     """Repeat the term exactly `count` times."""
-    term = String(term) if isinstance(term, str) else term
+    # Fast path: avoid wrapping if already correct type
+    if type(term) is str:
+        # Direct type comparison is usually a few ns faster than isinstance
+        # since strings are a final class and not subclassed in this context.
+        term = String(term)
     return QuantifyExact(term, count)
 
 
