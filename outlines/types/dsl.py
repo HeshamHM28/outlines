@@ -349,8 +349,7 @@ def exactly(count: int, term: Union[Term, str]) -> QuantifyExact:
 
 def at_least(count: int, term: Union[Term, str]) -> QuantifyMinimum:
     """Repeat the term at least `count` times."""
-    term = String(term) if isinstance(term, str) else term
-    return QuantifyMinimum(term, count)
+    return QuantifyMinimum(String(term) if isinstance(term, str) else term, count)
 
 
 def at_most(count: int, term: Union[Term, str]) -> QuantifyMaximum:
