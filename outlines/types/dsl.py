@@ -365,7 +365,9 @@ def between(min_count: int, max_count: int, term: Union[Term, str]) -> QuantifyB
 
 
 def zero_or_more(term: Union[Term, str]) -> KleeneStar:
-    term = String(term) if isinstance(term, str) else term
+    # Check type with type() for slightly better performance than isinstance(), as only two types are allowed
+    if type(term) is str:
+        term = String(term)
     return KleeneStar(term)
 
 
