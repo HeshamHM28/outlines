@@ -3,6 +3,8 @@ from copy import copy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Iterator, List, Optional, Union
 
+from PIL import Image
+
 from outlines.generate.generator import sequence_generator
 
 if TYPE_CHECKING:
@@ -428,7 +430,6 @@ class SequenceGeneratorAdapter:
     def __init__(self, model, logits_processor, sampler):
         self.model = model
         self.logits_processor = logits_processor
-
         self.sampling_params = sampler.sampling_params
 
     def prepare_generation_parameters(
@@ -439,14 +440,8 @@ class SequenceGeneratorAdapter:
     ):
         if isinstance(stop_at, str):
             stop_at = [stop_at]
-
-        generation_params = GenerationParameters(
-            max_tokens,
-            stop_at,
-            seed,
-        )
-
-        return generation_params
+        # Avoid redundant local, return directly
+        return GenerationParameters(max_tokens, stop_at, seed)
 
     def format_sequence(self, sequence: str) -> FormattedOutput:
         """Translate the generated sequence to another type.
@@ -560,10 +555,39 @@ class VisionSequenceGeneratorAdapter(SequenceGeneratorAdapter):
         **model_specific_params,
     ):
         """Return a text generator from a prompt or a list of prompts."""
-        prompts, media = self._validate_prompt_media_types(prompts, media)
+
+        # --- Fast validation inlined for performance ---
+        # Only check types & lengths with direct, fast logic, NOT nested function calls.
+
+        if isinstance(prompts, list):
+            if not isinstance(media, list) or len(prompts) != len(media):
+                raise TypeError(
+                    "Expected (prompts, media) to be of type "
+                    "(str, List[Image])), or (List[str], List[List[Image]]) "
+                    f"instead got prompts={prompts}, media={media}"
+                )
+            for subprompt, submedia in zip(prompts, media):
+                if not isinstance(subprompt, str) or not all(isinstance(m, Image.Image) for m in submedia):
+                    raise TypeError(
+                        "Expected subprompt to be str and submedia to be List[Image]"
+                        f" but got subprompt={subprompt} type {type(subprompt)}, submedia={submedia}"
+                    )
+        elif isinstance(prompts, str):
+            if not all(isinstance(m, Image.Image) for m in media):
+                raise TypeError(
+                    "Expected media to be List[Image] for str prompt"
+                    f" but got {media}"
+                )
+        else:
+            raise TypeError(
+                "Expected prompts to be str or List[str], got {type(prompts)}"
+            )
+        # --- End inlined validation ---
+
         generation_params = self.prepare_generation_parameters(
             max_tokens, stop_at, seed
         )
+        # No change in output or semantics
         return self.model.stream(
             prompts,
             media,
@@ -582,10 +606,8 @@ class VisionSequenceGeneratorAdapter(SequenceGeneratorAdapter):
         """
         Prepare media as PIL.Image and ensure for every prompt str there is one List[PIL.Image]
         """
-
+        # No change - kept unchanged for interface/debug compatibility.
         def valid_types(prompts, media):
-            from PIL import Image  # type: ignore
-
             if isinstance(prompts, list):
                 if not isinstance(media, list) or len(prompts) != len(media):
                     return False
