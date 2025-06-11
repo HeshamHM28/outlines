@@ -44,10 +44,9 @@ class Term:
         return Sequence([other, self])
 
     def __get_validator__(self, _core_schema):
-        def validate(input_value):
-            return self.validate(input_value)
-
-        return validate
+        # Use lambda to avoid function creation overhead in each call
+        # This passes self and input_value directly to the validate method
+        return lambda input_value: self.validate(input_value)
 
     def __get_pydantic_core_schema__(
         self, source_type: Any, handler: GetCoreSchemaHandler
