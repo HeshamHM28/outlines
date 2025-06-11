@@ -7,6 +7,7 @@ from pydantic import BaseModel, GetCoreSchemaHandler, GetJsonSchemaHandler
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import core_schema as cs
 from outlines_core.fsm.json_schema import build_regex_from_schema
+from functools import lru_cache
 
 
 class Term:
@@ -355,7 +356,8 @@ def at_least(count: int, term: Union[Term, str]) -> QuantifyMinimum:
 
 def at_most(count: int, term: Union[Term, str]) -> QuantifyMaximum:
     """Repeat the term exactly `count` times."""
-    term = String(term) if isinstance(term, str) else term
+    # Use memoized version to avoid repeat String-term creation
+    term = _memo_string(term) if isinstance(term, str) else term
     return QuantifyMaximum(term, count)
 
 
@@ -412,3 +414,9 @@ def to_regex(term: Term) -> str:
             raise TypeError(
                 f"Cannot convert object {repr(term)} to a regular expression."
             )
+
+
+# Only if String is just a function/class wrapping a string!
+@lru_cache(maxsize=256)
+def _memo_string(term: str):
+    return String(term)
