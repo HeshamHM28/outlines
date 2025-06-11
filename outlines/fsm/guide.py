@@ -102,11 +102,18 @@ CFGState = collections.namedtuple("CFGState", ["parser_state", "prev_token"])
 
 class CFGGuide(Guide):
     """Guide to generate text that is in the language of a context-free Lark grammar."""
-
-    def __init__(self, cfg_string: str, tokenizer):
+    def __init__(self, cfg_string: str, tokenizer, _parser=None, _initial_state=None):
         """
         Construct the PartialLark parser and set the empty initial_state (PartialParserState)
         """
+        if _parser is not None and _initial_state is not None:
+            self.cfg_string = cfg_string
+            self.tokenizer = tokenizer
+            self.eos_token_id = self.tokenizer.eos_token_id
+            self.parser = _parser
+            self.initial_state = _initial_state
+            return
+
         warnings.warn(
             "Outlines' public *community-contributed* CFG structured generation is experimental. "
             "Please review https://dottxt-ai.github.io/outlines/latest/reference/generation/cfg#disclaimer"
@@ -273,4 +280,9 @@ class CFGGuide(Guide):
 
     def copy(self) -> "CFGGuide":
         """Create a copy of the Guide."""
-        return CFGGuide(self.cfg_string, self.tokenizer)
+        return CFGGuide(
+            self.cfg_string,
+            self.tokenizer,
+            _parser=self.parser,
+            _initial_state=self.initial_state,
+        )
