@@ -380,35 +380,42 @@ def to_regex(term: Term) -> str:
     We only consider self-contained terms that do not refer to another rule.
 
     """
-    match term:
-        case String():
-            return re.escape(term.value)
-        case Regex():
-            return f"({term.pattern})"
-        case JsonSchema():
-            regex_str = build_regex_from_schema(term.schema)
-            return f"({regex_str})"
-        case KleeneStar():
-            return f"({to_regex(term.term)})*"
-        case KleenePlus():
-            return f"({to_regex(term.term)})+"
-        case Optional():
-            return f"({to_regex(term.term)})?"
-        case Alternatives():
-            regexes = [to_regex(subterm) for subterm in term.terms]
-            return f"({'|'.join(regexes)})"
-        case Sequence():
-            regexes = [to_regex(subterm) for subterm in term.terms]
-            return f"{''.join(regexes)}"
-        case QuantifyExact():
-            return f"({to_regex(term.term)}){{{term.count}}}"
-        case QuantifyMinimum():
-            return f"({to_regex(term.term)}){{{term.min_count},}}"
-        case QuantifyMaximum():
-            return f"({to_regex(term.term)}){{,{term.max_count}}}"
-        case QuantifyBetween():
-            return f"({to_regex(term.term)}){{{term.min_count},{term.max_count}}}"
-        case _:
-            raise TypeError(
-                f"Cannot convert object {repr(term)} to a regular expression."
-            )
+    t = type(term)
+    if t is String:
+        return re.escape(term.value)
+    elif t is Regex:
+        return f"({term.pattern})"
+    elif t is JsonSchema:
+        regex_str = build_regex_from_schema(term.schema)
+        return f"({regex_str})"
+    elif t is KleeneStar:
+        regex = to_regex(term.term)
+        return f"({regex})*"
+    elif t is KleenePlus:
+        regex = to_regex(term.term)
+        return f"({regex})+"
+    elif t is Optional:
+        regex = to_regex(term.term)
+        return f"({regex})?"
+    elif t is Alternatives:
+        # build all subterms first
+        regexes = [to_regex(subterm) for subterm in term.terms]
+        return f"({'|'.join(regexes)})"
+    elif t is Sequence:
+        regexes = [to_regex(subterm) for subterm in term.terms]
+        return f"{''.join(regexes)}"
+    elif t is QuantifyExact:
+        regex = to_regex(term.term)
+        return f"({regex}){{{term.count}}}"
+    elif t is QuantifyMinimum:
+        regex = to_regex(term.term)
+        return f"({regex}){{{term.min_count},}}"
+    elif t is QuantifyMaximum:
+        regex = to_regex(term.term)
+        return f"({regex}){{,{term.max_count}}}"
+    elif t is QuantifyBetween:
+        regex = to_regex(term.term)
+        return f"({regex}){{{term.min_count},{term.max_count}}}"
+    else:
+        # Only format the message if needed
+        raise TypeError("Cannot convert object {} to a regular expression.".format(repr(term)))
