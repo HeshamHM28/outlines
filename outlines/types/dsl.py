@@ -75,11 +75,15 @@ class Term:
         be defined with a regular expression.
 
         """
-        pattern = to_regex(self)
-        compiled = re.compile(pattern)
-        if compiled.fullmatch(str(value)):
-            return True
-        return False
+        # Cache the compiled regex for this instance (much faster, avoids redundant re.compile and string builds)
+        cache = _get_regex_cache(self)
+        compiled = cache.get("compiled")
+        if compiled is None:
+            pattern = to_regex(self)
+            compiled = re.compile(pattern)
+            cache["compiled"] = compiled
+        # Always convert value to str for the match (as before)
+        return compiled.fullmatch(str(value)) is not None
 
     def display_ascii_tree(self, indent="", is_last=True) -> str:
         """Display the regex tree in ASCII format."""
@@ -380,35 +384,59 @@ def to_regex(term: Term) -> str:
     We only consider self-contained terms that do not refer to another rule.
 
     """
+    # Use the instance-specific regex cache for all Term objects
+    return _to_regex_memo(term)
+
+
+# Helper function: cache regex patterns per Term instance for rapid re-use in matches
+def _get_regex_cache(term):
+    # Place cache in instance directly for best locality-of-reference
+    # (Python does not call __slots__/dataclass for most Term subclasses.)
+    cache = getattr(term, '_regex_cache', None)
+    if cache is None:
+        cache = {}
+        setattr(term, '_regex_cache', cache)
+    return cache
+
+
+def _to_regex_memo(term):
+    # Use instance-specific regex cache (per above) to avoid global cache holding references to potentially many Terms
+    cache = _get_regex_cache(term)
+    pat = cache.get("regex")
+    if pat is not None:
+        return pat
+    # Compute regex
     match term:
         case String():
-            return re.escape(term.value)
+            pat = re.escape(term.value)
         case Regex():
-            return f"({term.pattern})"
+            pat = f"({term.pattern})"
         case JsonSchema():
             regex_str = build_regex_from_schema(term.schema)
-            return f"({regex_str})"
+            pat = f"({regex_str})"
         case KleeneStar():
-            return f"({to_regex(term.term)})*"
+            pat = f"({_to_regex_memo(term.term)})*"
         case KleenePlus():
-            return f"({to_regex(term.term)})+"
+            pat = f"({_to_regex_memo(term.term)})+"
         case Optional():
-            return f"({to_regex(term.term)})?"
+            pat = f"({_to_regex_memo(term.term)})?"
         case Alternatives():
-            regexes = [to_regex(subterm) for subterm in term.terms]
-            return f"({'|'.join(regexes)})"
+            regexes = [_to_regex_memo(subterm) for subterm in term.terms]
+            pat = f"({'|'.join(regexes)})"
         case Sequence():
-            regexes = [to_regex(subterm) for subterm in term.terms]
-            return f"{''.join(regexes)}"
+            regexes = [_to_regex_memo(subterm) for subterm in term.terms]
+            pat = f"{''.join(regexes)}"
         case QuantifyExact():
-            return f"({to_regex(term.term)}){{{term.count}}}"
+            pat = f"({_to_regex_memo(term.term)}){{{term.count}}}"
         case QuantifyMinimum():
-            return f"({to_regex(term.term)}){{{term.min_count},}}"
+            pat = f"({_to_regex_memo(term.term)}){{{term.min_count},}}"
         case QuantifyMaximum():
-            return f"({to_regex(term.term)}){{,{term.max_count}}}"
+            pat = f"({_to_regex_memo(term.term)}){{,{term.max_count}}}"
         case QuantifyBetween():
-            return f"({to_regex(term.term)}){{{term.min_count},{term.max_count}}}"
+            pat = f"({_to_regex_memo(term.term)}){{{term.min_count},{term.max_count}}}"
         case _:
             raise TypeError(
                 f"Cannot convert object {repr(term)} to a regular expression."
             )
+    cache["regex"] = pat
+    return pat
