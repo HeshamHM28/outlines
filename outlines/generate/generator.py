@@ -1,6 +1,7 @@
 import dataclasses
 import math
 from typing import TYPE_CHECKING, Callable, Iterable, Iterator, List, Optional, Tuple
+import torch
 
 if TYPE_CHECKING:
     import torch
@@ -202,10 +203,10 @@ def update_token_ids(
     just generated.
 
     """
-    import torch
-
-    token_ids = torch.index_select(token_ids, 0, ancestors)
-    return torch.concatenate([token_ids, next_token_ids], dim=-1)
+    # Use fast tensor indexing instead of index_select
+    token_ids = token_ids[ancestors]
+    # torch.cat is faster than concatenate for this use-case
+    return torch.cat((token_ids, next_token_ids), dim=-1)
 
 
 def update_attention_masks(
