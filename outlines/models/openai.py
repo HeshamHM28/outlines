@@ -68,7 +68,6 @@ class OpenAIConfig:
 
 class OpenAI:
     """An object that represents the OpenAI API."""
-
     def __init__(
         self,
         client,
@@ -162,8 +161,16 @@ class OpenAI:
         )
 
     def new_with_replacements(self, **kwargs):
-        new_instance = copy.copy(self)
-        new_instance.config = replace(new_instance.config, **kwargs)
+        """Efficiently create a new OpenAI instance with replaced config attributes."""
+        # Directly create a new instance while copying other attributes except for config
+        new_config = replace(self.config, **kwargs)
+        new_instance = self.__class__.__new__(self.__class__)
+        # Only assign non-config attributes, and avoid unnecessary copying
+        new_instance.client = self.client
+        new_instance.config = new_config
+        new_instance.prompt_tokens = self.prompt_tokens
+        new_instance.completion_tokens = self.completion_tokens
+        new_instance.format_sequence = self.format_sequence
         return new_instance
 
     def __str__(self):
