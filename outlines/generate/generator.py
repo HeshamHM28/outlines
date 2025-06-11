@@ -1,6 +1,8 @@
 import dataclasses
 import math
 from typing import TYPE_CHECKING, Callable, Iterable, Iterator, List, Optional, Tuple
+import torch
+from outlines.fsm.guide import Guide
 
 if TYPE_CHECKING:
     import torch
@@ -240,11 +242,9 @@ def update_attention_masks(
 
 
 def reorder_fsms(fsms: List["Guide"], ancestors: "torch.Tensor") -> List["Guide"]:
-    reordered_fsms = []
-    for ancestor in ancestors:
-        reordered_fsms.append(fsms[ancestor].copy())
-
-    return reordered_fsms
+    ancestor_indices = ancestors.tolist()
+    # Use list comprehension for better speed and memory local reuse
+    return [fsms[i].copy() for i in ancestor_indices]
 
 
 def reorder_fsm_states(fsm_states: List[int], ancestors: "torch.Tensor") -> List[int]:
