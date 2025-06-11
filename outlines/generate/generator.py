@@ -1,6 +1,7 @@
 import dataclasses
 import math
 from typing import TYPE_CHECKING, Callable, Iterable, Iterator, List, Optional, Tuple
+import torch
 
 if TYPE_CHECKING:
     import torch
@@ -266,20 +267,26 @@ def reorder_kv_cache(
     first dimension is the batch size.
 
     """
-    import torch
-
     if kv_cache is None:
         return None
 
-    new_kv_cache: Tuple = tuple()
+    # Process cache structure with lists for efficiency, convert back to tuple at the end
+    ancestors = ancestors  # keep the reference
+    new_kv_cache_list = []
     for cache_item in kv_cache:
-        new_cache_item: Tuple = tuple()
+        new_cache_item_list = []
         for layer in cache_item:
-            layer = torch.index_select(layer, 0, ancestors.to(layer.device))
-            new_cache_item += (layer,)
-        new_kv_cache += (new_cache_item,)
-
-    return new_kv_cache
+            # Only move ancestors to device if necessary, cache per device
+            device = layer.device
+            if ancestors.device != device:
+                idx = ancestors.to(device)
+            else:
+                idx = ancestors
+            # Use index_select with already on-device indices
+            new_layer = torch.index_select(layer, 0, idx)
+            new_cache_item_list.append(new_layer)
+        new_kv_cache_list.append(tuple(new_cache_item_list))
+    return tuple(new_kv_cache_list)
 
 
 def bias_logits(logits: "torch.Tensor", allowed_token_ids: List) -> "torch.Tensor":
