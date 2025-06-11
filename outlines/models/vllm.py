@@ -1,6 +1,8 @@
 import dataclasses
 from typing import TYPE_CHECKING, List, Optional, Union
 
+from transformers import PreTrainedTokenizerBase
+
 from outlines.generate.api import GenerationParameters, SamplingParameters
 
 if TYPE_CHECKING:
@@ -206,22 +208,22 @@ def adapt_tokenizer(tokenizer: "PreTrainedTokenizerBase") -> "PreTrainedTokenize
     """
     from transformers import SPIECE_UNDERLINE
 
-    tokenizer.vocabulary = tokenizer.get_vocab()
-    tokenizer.special_tokens = set(tokenizer.all_special_tokens)
+    # Cache method for repeated use
+    _convert_tokens_to_string = tokenizer.convert_tokens_to_string
+    _spiece_underline = SPIECE_UNDERLINE
+    _space_special = "<0x20>"
 
     def convert_token_to_string(token: Union[str, bytes]) -> str:
-        string = tokenizer.convert_tokens_to_string([token])
-
-        # A hack to handle missing spaces to HF's Llama tokenizers
+        # Inline check for speed, apply logic only for str tokens
         if (
-            type(token) is str
-            and token.startswith(SPIECE_UNDERLINE)
-            or token == "<0x20>"
+            isinstance(token, str)
+            and (token.startswith(_spiece_underline) or token == _space_special)
         ):
-            return " " + string
+            # Fast path: avoid assign to intermediate variable
+            return " " + _convert_tokens_to_string([token])
+        return _convert_tokens_to_string([token])
 
-        return string
-
+    # Override the tokenizer's method with our fast version
     tokenizer.convert_token_to_string = convert_token_to_string
 
     return tokenizer
